@@ -1,205 +1,154 @@
-"use strict"
-
 $(document).ready(function () {
-    let divIntestazione = $("#divIntestazione");
-    let divFilters = $(".card").eq(0);
-    let divCollections = $("#divCollections");
-    let table = $("#mainTable");
-    let divDettagli = $("#divDettagli");
-    let currentCollection = "";
 
-    divFilters.hide();
-    $("#btnAdd").prop("disabled", true);
-    $("#lstHair").prop("selectedIndex", -1);
+	let txtUser = $("#txtUser");
+	let txtFile = $("#txtFile");
 
-    getCollections();
+	getImages();
 
-    $("#btnFind").on("click", () => {
-        let hair = $("#lstHair").val();
-        let gender = "";
-        if (divFilters.find("input:checkbox:checked").length == 1) {
-            gender = divFilters.find("input:checkbox:checked").val();
-        }
-        let filters = {};
-        if (hair) {
-            filters["hair"] = hair.toLowerCase();
-        }
-        if (gender) {
-            filters["gender"] = gender.toLowerCase();
-        }
-        getDataCollection(filters);
-    });
+	function getImages() {
+		let rq = inviaRichiesta("GET", "/api/getImages");
+		rq.catch(errore);
+		rq.then((response) => {
+			let tbody = $("#mainTable").children("tbody");
+			tbody.empty();
+			for (let image of response.data) {
+				let tr = $("<tr>").appendTo(tbody).addClass("text-center");
+				$("<td>").appendTo(tr).text(image.username);
+				// Se esiste e non è un base64 e non è cloudinary
+				if (image.img && !image.img.toString().startsWith("data:image") && !image.img.toString().startsWith("https://res.cloudinary.com")) {
+					image.img = `img/${image.img}`;
+				}
+				$("<td>").appendTo(tr).append($("<img>").prop("src", image.img));
+			}
+		});
+	}
 
-    $("#btnAdd").on("click", () => {
-        divDettagli.empty();
-        $("<textarea>").appendTo(divDettagli).prop("placeholder", '{"nome": "Pippo"}');
-        $("<button>").addClass("btn btn-success btn-sm").appendTo(divDettagli).text("INVIA").on("click", function () {
-            let newRecord = divDettagli.children("textarea").val();
-            try {
-                newRecord = JSON.parse(newRecord);
-            } catch (error) {
-                alert(`JSON non valido:\n${error}`);
-                return;
-            }
-            let rq = inviaRichiesta("POST", `/api/${currentCollection}`, newRecord);
-            rq.then((response) => {
-                console.log(response.data);
-                alert("Record inserito correttamente");
-                getDataCollection();
-            });
-            rq.catch(errore);
-        });
-        $("<button>").appendTo(divDettagli).text("ANNULLA").addClass("btn btn-sm btn-danger").on("click", function (){
-            divDettagli.empty();
-        })
-    });
+	$("#btnBinary").on("click", () => {
+		let username = $("#txtUser").val();
+		// La proprietà files restituisce sempre un vettore di File Objects
+		let img = $("#txtFile").prop("files")[0];
+		if (!username || !img) {
+			alert("Inserire username e immagine");
+		}
+		else {
+			let formData = new FormData();
+			formData.append("username", username);
+			formData.append("img", img);
+			// Il formData va passatto così com'è, non bisogna creare un json
+			let rq = inviaRichiesta("POST", "/api/addBinaryImage", formData);
+			rq.catch(errore);
+			rq.then((response) => {
+				alert("Record inserito correttamente");
+				getImages();
+				$("#txtUser").val("");
+				$("#txtFile").val("");
+			});
+		}
+	});
 
-    /******************************************************/
+	$("#btnBase64").on("click", async function () {
+		let username = $("#txtUser").val();
+		// La proprietà files restituisce sempre un vettore di File Objects
+		let img = $("#txtFile").prop("files")[0];
+		if (!username || !img) {
+			alert("Inserire username e immagine");
+		}
+		else {
+			// Senza await restituisce una promise e i dati saranno dentro la callback del then
+			// let promise = base64Convert(img);
+			// promise.catch((err) => alert(`Errore conversione file: ${err}`));
+			// promise.then((imgBase64) => console.log(imgBase64));
+			// Con await restituisce direttamente i dati e non la promise. Per prendere l'errore si accoda il .catch() con la sua callback
+			let imgBase64 = await base64Convert(img).catch((err) => alert(`Errore conversione file: ${err}`));
+			console.log(imgBase64);
+			let rq = inviaRichiesta("POST", "/api/addBase64Image", { username, imgBase64 });
+			rq.catch(errore);
+			rq.then((response) => {
+				alert("Record inserito correttamente");
+				getImages();
+				$("#txtUser").val("");
+				$("#txtFile").val("");
+			});
+		}
+	});
 
-    function getCollections() {
-        let rq = inviaRichiesta("GET", "/api/getCollections");
-        rq.then((response) => {
-            console.log(response.data);
-            let label = divCollections.children("label");
-            response.data.forEach((item, i) => {
-                let clonedLabel = label.clone().appendTo(divCollections);
-                clonedLabel.children("span").text(item.name);
-                clonedLabel.children("input:radio").on("click", function () {
-                    currentCollection = $(this).next("span").text();
-                    $("#btnAdd").prop("disabled", false);
-                    getDataCollection();
-                });
-            });
-            label.remove();
-        });
-        rq.catch(errore);
-    }
+	$("#btnBase64Cloudinary").on("click", () => {
 
-    function getDataCollection(filters = {}) {
-        let rq = inviaRichiesta("GET", `/api/${currentCollection}`, filters);
-        rq.then((response) => {
-            console.log(response.data);
-            divIntestazione.find("strong").eq(0).text(currentCollection);
-            divIntestazione.find("strong").eq(1).text(response.data.length);
-            let _tbody = table.children("tbody");
-            _tbody.empty();
-            response.data.forEach((item, i) => {
-                let tr = $("<tr>").appendTo(_tbody);
-                $("<td>").appendTo(tr).text(item._id).on("click", function () {
-                    getDetails(item._id);
-                });
-                // Facendo così si prende la seconda chiave qualunque essa sia
-                let key = Object.keys(item)[1];
-                $("<td>").appendTo(tr).text(item[key]).on("click", function () {
-                    getDetails(item._id);
-                });
-                let td = $("<td>").appendTo(tr);
-                $("<div>").appendTo(td).on("click", () => {
-                    getDetails(item._id, "patch");
-                });
-                $("<div>").appendTo(td).on("click", () => {
-                    getDetails(item._id, "put");
-                });
-                $("<div>").appendTo(td).on("click", () => {
-                    deleteRecord(item._id);
-                });
-            });
-            if (currentCollection == "unicorns") {
-                divFilters.show();
-            }
-            else {
-                divFilters.hide();
-                divFilters.find("input:checkbox").prop("checked", false);
-                $("#lstHair").prop("selectedIndex", -1);
-            }
-            divDettagli.empty();
-        });
-        rq.catch(errore);
-    }
+	});
 
-    function getDetails(_id, method = "get") {
-        let rq = inviaRichiesta("GET", `/api/${currentCollection}/${_id}`);
-        rq.then((response) => {
-            console.log(response.data);
-            divDettagli.empty();
-            $("<strong>").appendTo(divDettagli).text("DETTAGLI:");
-            $("<br>").appendTo(divDettagli);
-            $("<br>").appendTo(divDettagli);
-            if (method == "get") {
-                for (let key in response.data) {
-                    $("<strong>").appendTo(divDettagli).text(`${key}: `);
-                    $("<span>").appendTo(divDettagli).text(JSON.stringify(response.data[key]));
-                    $("<br>").appendTo(divDettagli);
-                }
-            }
-            else {
-                // Permette di eliminare la chiave _id perchè non dobbiamo modificarla
-                delete (response.data["_id"]);
-                let textarea = $("<textarea>").appendTo(divDettagli)
-                if(method == "patch"){
-                    textarea.val(JSON.stringify({"$set": {"residenza":"Fossano"}}, null, 3))
-                }else{
-                    textarea.val(JSON.stringify(response.data, null, 3));
-                }
-                textarea.css("height", `${textarea.get(0).scrollHeight}px`);
-                $("<button>").appendTo(divDettagli).text("AGGIORNA").addClass("btn btn-sm btn-success").on("click", function () {
-                    let updatedRecord = divDettagli.children("textarea").val();
-                    try {
-                        updatedRecord = JSON.parse(updatedRecord);
-                    } catch (error) {
-                        alert(`JSON non valido:\n${error}`);
-                        return;
-                    }
-                    let rq = inviaRichiesta(method.toUpperCase(), `/api/${currentCollection}/${_id}`, updatedRecord);
-                    rq.then((response) => {
-                        console.log(response.data);
-                        alert("Aggiornamento avvenuto correttamente");
-                        getDataCollection();
-                    })
-                    rq.catch(errore);
-                });
-                $("<button>").appendTo(divDettagli).text("ANNULLA").addClass("btn btn-sm btn-danger").on("click", function (){
-                    divDettagli.empty();
-                })
-            }
-        });
-        rq.catch(errore);
-    }
-
-    function deleteRecord(_id) {
-        if (confirm("Vuoi veramente cancellare questo record?")) {
-            let rq = inviaRichiesta("DELETE", `/api/${currentCollection}/${_id}`);
-            rq.then((response) => {
-                console.log(response.data);
-                alert("Record cancellato correttamente");
-                getDataCollection();
-            });
-            rq.catch(errore);
-        }
-    }
-
-    $("#test").hide();
-
-    $("#test").on("click", () => {
-        let filters = { "hair": "blonde", "gender": "f" };
-        let action = { "$inc": { "vampires": 10 } };
-        let rq = inviaRichiesta("PATCH", "/api/unicorns", { filters, action });
-        rq.then((response) => {
-            console.log(response.data);
-            alert("Aggiornamento avvenuto correttamente");
-            getDataCollection();
-        });
-        rq.catch(errore);
-    });
-    
-    $("#test").on("click", () => {
-        let filters = { "hair": "blonde", "gender": "m" };
-        let rq = inviaRichiesta("DELETE", "/api/unicorns", filters);
-        rq.then((response) => {
-            console.log(response.data);
-            alert("Cancellazione avvenuta correttamente");
-            getDataCollection();
-        });
-        rq.catch(errore);
-    });
 });
+
+// Il parametro img è di tipo File Object e restituisce un base64
+function base64Convert(fileObject) {
+	return new Promise((resolve, reject) => {
+		let reader = new FileReader();
+		reader.readAsDataURL(fileObject);
+		// event viene passato a tutte le procedure Javascript e contiene 
+		// un parametro chiamato target che rappresenta il puntatore all'elemento 
+		// che ha scatenato l'evento
+		reader.onload = (event) => {
+			// resolve(reader.result);
+			resolve(event.target.result);
+		}
+		reader.onerror = (err) => {
+			reject(err);
+		}
+	});
+}
+
+/* *********************** resizeAndConvert() ****************************** */
+/* resize (tramite utilizzo della libreria PICA.JS) and base64 conversion    */
+// Il parametro file è di tipo File Object
+function resizeAndConvert(file) {
+	/* step 1: lettura tramite FileReader del file binario scelto dall'utente.
+			   File reader restituisce un file base64
+	// step 2: conversione del file base64 in oggetto Image da passare alla lib pica
+	// step 3: resize mediante la libreria pica che restituisce un canvas
+				che trasformiamo in blob (dato binario di grandi dimensioni)
+	// step 4: conversione del blob in base64 da inviare al server               */
+	return new Promise(function (resolve, reject) {
+		const WIDTH = 640;
+		const HEIGHT = 480;
+		let type = file.type;
+		let reader = new FileReader();
+		reader.readAsDataURL(file) // restituisce il file in base 64
+		//reader.addEventListener("load", function () {
+		reader.onload = function () {
+			let img = new Image()
+			img.src = reader.result // reader.result restituisce l'immagine in base64  						
+			img.onload = function () {
+				if (img.width < WIDTH && img.height < HEIGHT)
+					resolve(reader.result);
+				else {
+					let canvas = document.createElement("canvas");
+					if (img.width > img.height) {
+						canvas.width = WIDTH;
+						canvas.height = img.height * (WIDTH / img.width)
+					} else {
+						canvas.height = HEIGHT
+						canvas.width = img.width * (HEIGHT / img.height);
+					}
+					let _pica = new pica()
+					_pica.resize(img, canvas, {
+						unsharpAmount: 80,
+						unsharpRadius: 0.6,
+						unsharpThreshold: 2
+					})
+						.then(function (resizedImage) {
+							// resizedImage è restituita in forma di canvas
+							_pica.toBlob(resizedImage, type, 0.90)
+								.then(function (blob) {
+									var reader = new FileReader();
+									reader.readAsDataURL(blob);
+									reader.onload = function () {
+										resolve(reader.result); //base 64
+									}
+								})
+								.catch(err => reject(err))
+						})
+						.catch(function (err) { reject(err) })
+				}
+			}
+		}
+	})
+}
