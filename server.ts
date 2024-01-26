@@ -4,30 +4,23 @@ import _fs from "fs";
 import _express from "express";
 import _dotenv from "dotenv";
 import _cors from "cors";
-import _fileUpload from "express-fileupload";
-import _cloudinary from 'cloudinary';
 
-// Lettura delle password e parametri fondamentali
+// Lettura delle password
 _dotenv.config({ "path": ".env" });
-
-// Configurazione Cloudinary
-_cloudinary.v2.config({
-    cloud_name: process.env.cloud_name,
-    api_key: process.env.api_key,
-    api_secret: process.env.api_secret
-});
 
 // Variabili relative a MongoDB ed Express
 import { MongoClient, ObjectId } from "mongodb";
-const DBNAME = process.env.DBNAME;
+const DBNAME = "Unicorns";
 const connectionString: string = process.env.connectionStringAtlas;
 const app = _express();
 
-// Creazione ed avvio del server
-// app è il router di Express, si occupa di tutta la gestione delle richieste http
-const PORT: number = parseInt(process.env.PORT);
+// Variabili generiche
+const PORT: number = 1337;
 let paginaErrore;
+
+// app è il router di Express, si occupa di tutta la gestione delle richieste http
 const server = _http.createServer(app);
+
 // Il secondo parametro facoltativo ipAddress consente di mettere il server in ascolto su una delle interfacce della macchina, se non lo metto viene messo in ascolto su tutte le interfacce (3 --> loopback e 2 di rete)
 server.listen(PORT, () => {
     init();
@@ -65,11 +58,7 @@ app.use("/", _express.json({ "limit": "50mb" }));
 // .urlencoded() intercetta solo i parametri passati in urlencoded nel body della http request
 app.use("/", _express.urlencoded({ "limit": "50mb", "extended": true }));
 
-// 4. Aggancio dei parametri del FormData e dei parametri scalari passati dentro il FormData
-// Dimensione massima del file = 10 MB
-app.use("/", _fileUpload({ "limits": { "fileSize": (10 * 1024 * 1024) } }));
-
-// 5. Log dei parametri GET, POST, PUT, PATCH, DELETE
+// 4. Log dei parametri GET, POST, PUT, PATCH, DELETE
 app.use("/", (req: any, res: any, next: any) => {
     if (Object.keys(req["query"]).length > 0) {
         console.log(`       ${JSON.stringify(req["query"])}`);
@@ -80,7 +69,7 @@ app.use("/", (req: any, res: any, next: any) => {
     next();
 });
 
-// 6. Controllo degli accessi tramite CORS
+// 5. Controllo degli accessi tramite CORS
 const corsOptions = {
     origin: function (origin, callback) {
         return callback(null, true);
@@ -93,88 +82,116 @@ app.use("/", _cors(corsOptions));
 // Routes finali di risposta al client
 //********************************************************************************************//
 
-app.get("/api/getImages", async (req, res, next) => {
+app.get("/api/getCollections", async (req, res, next) => {
     const client = new MongoClient(connectionString);
     await client.connect();
-    let collection = client.db(DBNAME).collection("images");
-    let rq = collection.find().toArray();
+    let db = client.db(DBNAME);
+    // db.listCollections() richiede al server l'elenco delle collezioni presenti nel db
+    let rq = db.listCollections().toArray();
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore nella lettura delle collezioni: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.get("/api/:collection", async (req, res, next) => {
+    let filters = req["query"];
+    let selectedCollection = req["params"].collection;
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.find(filters).toArray();
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
 });
 
-app.post("/api/addBinaryImage", (req, res, next) => {
-    // 1 --> salvare su disco
-    // 2 --> aggiungere un record nel database
-    let username = req["body"].username;
-    // img contiene due campi principali: 
-    // img.name contiene il nome del file scelto dal client
-    // img.data contiene il contenuto binario del file
-    let img = req["files"].img;
-    if (_fs.existsSync(`./static/img/${username}.jpg`)) {
-        res.status(500).send("File già esistente");
-    }
-    else {
-        _fs.writeFile(`./static/img/${username}.jpg`, img.data, async function (err) {
-            if (err) {
-                res.status(500).send(`Errore salvataggio file: ${err}`);
-            }
-            else {
-                const client = new MongoClient(connectionString);
-                await client.connect();
-                let collection = client.db(DBNAME).collection("images");
-                let rq = collection.insertOne({ username, "img": `${username}.jpg` });
-                rq.then((data) => res.send(data));
-                rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
-                rq.finally(() => client.close());
-            }
-        });
-    }
+app.get("/api/:collection/:id", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let id = req["params"].id;
+    let objId = new ObjectId(req["params"].id);
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.findOne({ "_id": objId });
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
 });
 
-app.post("/api/addBase64Image", (req, res, next) => {
-    let username = req["body"].username;
-    let imgBase64 = req["body"].imgBase64;
-    if (_fs.existsSync(`./static/img/${username}.jpg`)) {
-        res.status(500).send("File già esistente");
-    }
-    else {
-        imgBase64 = imgBase64.replace(/^data:image\/\w+;base64,/, "");
-        let binaryImg = Buffer.from(imgBase64, "base64");
-        _fs.writeFile(`./static/img/${username}.jpg`, binaryImg, async function (err) {
-            if (err) {
-                res.status(500).send(`Errore salvataggio file: ${err}`);
-            }
-            else {
-                const client = new MongoClient(connectionString);
-                await client.connect();
-                let collection = client.db(DBNAME).collection("images");
-                let rq = collection.insertOne({ username, "img": `${username}.jpg` });
-                rq.then((data) => res.send(data));
-                rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
-                rq.finally(() => client.close());
-            }
-        });
-    }
+app.post("/api/:collection", async (req, res, next) => {
+    let newRecord = req["body"];
+    let selectedCollection = req["params"].collection;
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.insertOne(newRecord);
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
 });
 
-app.post("/api/addBase64CloudinaryImage", async (req, res, next) => {
-    let username = req["body"].username;
-    let imgBase64 = req["body"].imgBase64;
-    _cloudinary.v2.uploader.upload(imgBase64, {"folder":"Es_03_Upload"})
-    .catch((err)=>{
-        res.status(500).send("Error uploading file on Cloudinary: " + err)
-    })
-    .then(async(cloudinaryUrl)=>{
-        const client = new MongoClient(connectionString);
-        await client.connect();
-        let collection = client.db(DBNAME).collection("images");
-        let rq = collection.insertOne({ username, "img": cloudinaryUrl });
-        rq.then((data) => res.send(data));
-        rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
-        rq.finally(() => client.close());
-    })
-    
+app.delete("/api/:collection/:id", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let objId = new ObjectId(req["params"].id);
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.deleteOne({ "_id": objId });
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.delete("/api/:collection", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let filters = req["body"];
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.deleteMany(filters);
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.patch("/api/:collection/:id", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let objId = new ObjectId(req["params"].id);
+    let action = req["body"]
+    let updatedRecord = req["body"];
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.updateOne({ "_id": objId }, action);
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.patch("/api/:collection", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let filters = req["body"].filters;
+    let action = req["body"].action;
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.updateMany(filters, action);
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.put("/api/:collection/:id", async (req, res, next) => {
+    let selectedCollection = req["params"].collection;
+    let objId = new ObjectId(req["params"].id);
+    let updatedRecord = req["body"];
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.replaceOne({ "_id": objId }, updatedRecord);
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
 });
 
 //********************************************************************************************//
