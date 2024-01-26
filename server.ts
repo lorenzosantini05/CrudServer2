@@ -14,6 +14,7 @@ const DBNAME = "Unicorns";
 const connectionString: string = process.env.connectionStringAtlas;
 const app = _express();
 
+
 // Variabili generiche
 const PORT: number = 1337;
 let paginaErrore;
@@ -70,9 +71,24 @@ app.use("/", (req: any, res: any, next: any) => {
 });
 
 // 5. Controllo degli accessi tramite CORS
+
+const whitelist = [
+    "http://crud-server-2.herokuapp.com ", // porta 80 (default)
+    "https://crud-server-2.herokuapp.com ", // porta 443 (default)
+    "http://localhost:3000",
+    "https://localhost:3001",
+    "http://localhost:4200"
+   ];
+   
+
 const corsOptions = {
     origin: function (origin, callback) {
-        return callback(null, true);
+        if(!origin)
+            return callback(null, true);
+        if(whitelist.indexOf(origin) === -1){
+            var msg = "The CORS policy for this site does not allow access from the specified Origin";
+            return callback(new Error(msg), false);
+        }
     },
     credentials: true
 };
