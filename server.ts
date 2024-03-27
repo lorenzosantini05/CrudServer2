@@ -2,27 +2,22 @@ import _http from "http";
 import _url from "url";
 import _fs from "fs";
 import _express from "express";
-import _dotenv from "dotenv";
 import _cors from "cors";
+import _dotenv from "dotenv";
+_dotenv.config({ path: ".env" });
 
-// Lettura delle password
-_dotenv.config({ "path": ".env" });
 
 // Variabili relative a MongoDB ed Express
 import { MongoClient, ObjectId } from "mongodb";
-const DBNAME = "Unicorns";
-const connectionString: string = process.env.connectionStringAtlas;
+const connectionString:string = process.env.connectionStringAtlas;
+const DBNAME = process.env.DBNAME
 const app = _express();
 
 
-// Variabili generiche
-const PORT: number = 1337;
+// Creazione e avvio del server
+const PORT:number = parseInt(process.env.PORT)
 let paginaErrore;
-
-// app è il router di Express, si occupa di tutta la gestione delle richieste http
 const server = _http.createServer(app);
-
-// Il secondo parametro facoltativo ipAddress consente di mettere il server in ascolto su una delle interfacce della macchina, se non lo metto viene messo in ascolto su tutte le interfacce (3 --> loopback e 2 di rete)
 server.listen(PORT, () => {
     init();
     console.log(`Il Server è in ascolto sulla porta ${PORT}`);
@@ -39,9 +34,10 @@ function init() {
     });
 }
 
-//********************************************************************************************//
+
+//****************************************************************************//
 // Routes middleware
-//********************************************************************************************//
+//****************************************************************************//
 
 // 1. Request log
 app.use("/", (req: any, res: any, next: any) => {
@@ -49,17 +45,19 @@ app.use("/", (req: any, res: any, next: any) => {
     next();
 });
 
+
 // 2. Gestione delle risorse statiche
-// .static() è un metodo di express che ha già implementata la firma di sopra. Se trova il file fa la send() altrimenti fa la next()
 app.use("/", _express.static("./static"));
 
-// 3. Lettura dei parametri POST di req["body"] (bodyParser)
-// .json() intercetta solo i parametri passati in json nel body della http request
+
+// 3. Lettura dei parametri POST 
+// .json() intercetta i parametri json nel body della http request
 app.use("/", _express.json({ "limit": "50mb" }));
-// .urlencoded() intercetta solo i parametri passati in urlencoded nel body della http request
+// .urlencoded() intercetta i parametri urlencoded nel body della http request
 app.use("/", _express.urlencoded({ "limit": "50mb", "extended": true }));
 
-// 4. Log dei parametri GET, POST, PUT, PATCH, DELETE
+
+// 4. Log dei parametri 
 app.use("/", (req: any, res: any, next: any) => {
     if (Object.keys(req["query"]).length > 0) {
         console.log(`       ${JSON.stringify(req["query"])}`);
@@ -70,42 +68,68 @@ app.use("/", (req: any, res: any, next: any) => {
     next();
 });
 
-// 5. Controllo degli accessi tramite CORS
 
-const whitelist = [
-    "http://crud-server-2.herokuapp.com ", // porta 80 (default)
-    "https://crud-server-2.herokuapp.com ", // porta 443 (default)
-    "http://localhost:3000",
-    "https://localhost:3001",
-    "http://localhost:4200"
-   ];
-   
-
+// 5 - CORS Policy
 const corsOptions = {
-    origin: function (origin, callback) {
-        if(!origin)
-            return callback(null, true);
-        if(whitelist.indexOf(origin) === -1){
-            var msg = "The CORS policy for this site does not allow access from the specified Origin";
-            return callback(new Error(msg), false);
-        }
+    origin: function(origin, callback) {
+          return callback(null, true);
     },
     credentials: true
 };
 app.use("/", _cors(corsOptions));
 
-//********************************************************************************************//
+
+//****************************************************************************//
 // Routes finali di risposta al client
-//********************************************************************************************//
+//****************************************************************************//
+
+/* ************************************************************************** */
+// Servizi Specifici
+// Devono essere messi all'inizio perchè altrimenti risponderebbero 
+// le routes parametriche già scritte
+app.get("/api/getBrands", async (req, res, next) => {
+    let selectedCollection = "models";
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.distinct("marca");
+    rq.then((data) => res.send(data));
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+app.get("/api/getCities", async (req, res, next) => {
+    let selectedCollection = "concerti";
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.distinct("sede.citta");
+    rq.then((data) =>  res.send(data) );
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+app.get("/api/getGenders", async (req, res, next) => {
+    let selectedCollection = "concerti";
+    const client = new MongoClient(connectionString);
+    await client.connect();
+    let collection = client.db(DBNAME).collection(selectedCollection);
+    let rq = collection.distinct("genere");
+    rq.then((data) =>  res.send(data) );
+    rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
+    rq.finally(() => client.close());
+});
+
+
+/* ************************************************************************** */
+
 
 app.get("/api/getCollections", async (req, res, next) => {
     const client = new MongoClient(connectionString);
     await client.connect();
     let db = client.db(DBNAME);
-    // db.listCollections() richiede al server l'elenco delle collezioni presenti nel db
     let rq = db.listCollections().toArray();
     rq.then((data) => res.send(data));
-    rq.catch((err) => res.status(500).send(`Errore nella lettura delle collezioni: ${err}`));
+    rq.catch((err) => res.status(500).send(`Errore lettura collezioni: ${err}`))
     rq.finally(() => client.close());
 });
 
@@ -123,12 +147,16 @@ app.get("/api/:collection", async (req, res, next) => {
 
 app.get("/api/:collection/:id", async (req, res, next) => {
     let selectedCollection = req["params"].collection;
-    let id = req["params"].id;
-    let objId = new ObjectId(req["params"].id);
+	let id = req["params"].id
+    let objId;
+	if(ObjectId.isValid(id)) 
+		objId = new ObjectId(id)
+	else
+		objId = id as unknown as ObjectId;	    
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.findOne({ "_id": objId });
+    let rq = collection.findOne({ "_id":objId });
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
@@ -147,38 +175,57 @@ app.post("/api/:collection", async (req, res, next) => {
 });
 
 app.delete("/api/:collection/:id", async (req, res, next) => {
-    let selectedCollection = req["params"].collection;
-    let objId = new ObjectId(req["params"].id);
+	let id = req["params"].id
+    let objId;
+	if(ObjectId.isValid(id)) 
+		objId = new ObjectId(id)
+	else
+		objId = id as unknown as ObjectId;	    
+	let selectedCollection = req["params"].collection;
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.deleteOne({ "_id": objId });
+    let rq = collection.deleteOne({"_id" : objId});
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
 });
 
-app.delete("/api/:collection", async (req, res, next) => {
+app.delete("/api/:collection/", async (req, res, next) => {
     let selectedCollection = req["params"].collection;
-    let filters = req["body"];
+	let filter = req["body"]
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.deleteMany(filters);
+    let rq = collection.deleteMany(filter);
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
 });
 
+/**
+   * Chiama il metodo PATCH con l'obbligo di specificare nel body la ACTION da eseguire.
+   *
+   * @remarks
+   * Utilizzando questo metodo la PATCH risulta più flessibile.
+   *
+   * @param id - id del record
+   * @body i nuovi valori da aggiornare, ad esempio: {"$inc":{"qta":1}}
+   * @returns Un JSON di conferma dell'aggiornamento
+   */
 app.patch("/api/:collection/:id", async (req, res, next) => {
-    let selectedCollection = req["params"].collection;
-    let objId = new ObjectId(req["params"].id);
-    let action = req["body"]
-    let updatedRecord = req["body"];
+	let selectedCollection = req["params"].collection;
+	let id = req["params"].id
+    let objId;
+	if(ObjectId.isValid(id))  
+		objId = new ObjectId(id)
+	else
+		objId = id as unknown as ObjectId;	  
+	let action = req["body"];
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.updateOne({ "_id": objId }, action);
+    let rq = collection.updateOne({"_id" : objId}, action);
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
@@ -186,33 +233,50 @@ app.patch("/api/:collection/:id", async (req, res, next) => {
 
 app.patch("/api/:collection", async (req, res, next) => {
     let selectedCollection = req["params"].collection;
-    let filters = req["body"].filters;
-    let action = req["body"].action;
+	let filter=req["body"].filter;
+	let action = req["body"].action;
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.updateMany(filters, action);
+    let rq = collection.updateMany(filter, action);
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
 });
 
+/**
+   * Chiama il metodo PUT aggiornando il record invece che sostituirlo.
+   *
+   * @remarks
+   * Utilizzando questo metodo la PUT esegue direttamente il SET del valore ricevuto.
+   *
+   * @param id - id del record
+   * @body i nuovi valori da aggiornare
+   * @returns Un JSON di conferma dell'aggiornamento
+   */
 app.put("/api/:collection/:id", async (req, res, next) => {
+	let id = req["params"].id
+    let objId;
+	if(ObjectId.isValid(id)) 
+		objId = new ObjectId(id)
+	else
+		objId = id as unknown as ObjectId;	    
     let selectedCollection = req["params"].collection;
-    let objId = new ObjectId(req["params"].id);
-    let updatedRecord = req["body"];
+	let newValues = req["body"]; 
     const client = new MongoClient(connectionString);
     await client.connect();
     let collection = client.db(DBNAME).collection(selectedCollection);
-    let rq = collection.replaceOne({ "_id": objId }, updatedRecord);
+    let rq = collection.updateOne({"_id":objId}, {"$set":newValues});
     rq.then((data) => res.send(data));
     rq.catch((err) => res.status(500).send(`Errore esecuzione query: ${err}`));
     rq.finally(() => client.close());
 });
 
-//********************************************************************************************//
-// Default route e gestione degli errori
-//********************************************************************************************//
+
+
+//****************************************************************************//
+//  Default route e gestione degli errori
+//****************************************************************************//
 
 app.use("/", (req, res, next) => {
     res.status(404);
